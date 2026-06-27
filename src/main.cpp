@@ -52,9 +52,7 @@ enum ScreenId {
   SCREEN_VOLUME_APPS = 1,
   SCREEN_DEVICES_OUTPUT = 2,
   SCREEN_DEVICES_INPUT = 3,
-  SCREEN_PLAYBACK = 4,
-  SCREEN_SYSINFO = 5,
-  NUM_SCREENS = 6
+  NUM_SCREENS = 4
 };
 
 ScreenId currentScreen = SCREEN_VOLUME_MASTER;
@@ -77,22 +75,6 @@ AppVolume appVolumes[] = {
 const int NUM_APPS = 4;
 int selectedApp = 1; // начнём с Discord, не Master
 
-struct PlaybackInfo {
-  const char *artist;
-  const char *track;
-  int32_t position;
-  int32_t duration;
-  bool isPlaying;
-};
-
-PlaybackInfo playback = {
-  "The Weeknd",
-  "Blinding Lights",
-  45,
-  200,
-  true
-};
-
 struct Device {
   const char *name;
 };
@@ -110,18 +92,6 @@ Device inputDevices[] = {
 };
 const int NUM_INPUT_DEVICES = 2;
 int selectedInput = 0;
-
-struct SysInfo {
-  float cpuLoad;
-  float gpuLoad;
-  int32_t ramUsed;
-  int32_t ramTotal;
-  int32_t tempCPU;
-};
-
-SysInfo sysInfo = {
-  45.5f, 12.0f, 4096, 8192, 52
-};
 
 // =========================================================
 // LVGL Display & Input
@@ -336,149 +306,6 @@ void update_devices_input_screen() {
 }
 
 // =========================================================
-// Screen 4: Playback
-// =========================================================
-lv_obj_t *trackLabel;
-lv_obj_t *artistLabel;
-lv_obj_t *playPauseBtn;
-lv_obj_t *timeLabel;
-
-void create_playback_screen() {
-  lv_obj_t *scr = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), LV_PART_MAIN);
-
-  lv_obj_t *title = lv_label_create(scr);
-  lv_label_set_text(title, "Playback");
-  lv_obj_set_style_text_color(title, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
-
-  lv_obj_t *infoBox = lv_obj_create(scr);
-  lv_obj_set_width(infoBox, 248);
-  lv_obj_set_height(infoBox, 88);
-  lv_obj_align(infoBox, LV_ALIGN_TOP_MID, 0, 34);
-  lv_obj_set_style_bg_color(infoBox, lv_color_hex(0x1A202C), LV_PART_MAIN);
-  lv_obj_set_style_border_color(infoBox, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_border_width(infoBox, 2, LV_PART_MAIN);
-
-  trackLabel = lv_label_create(infoBox);
-  lv_label_set_text(trackLabel, "");
-  lv_obj_set_style_text_color(trackLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(trackLabel, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_align(trackLabel, LV_ALIGN_TOP_MID, 0, 4);
-
-  artistLabel = lv_label_create(infoBox);
-  lv_label_set_text(artistLabel, "");
-  lv_obj_set_style_text_color(artistLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(artistLabel, &lv_font_montserrat_12, LV_PART_MAIN);
-  lv_obj_align(artistLabel, LV_ALIGN_TOP_MID, 0, 24);
-
-  timeLabel = lv_label_create(infoBox);
-  lv_label_set_text(timeLabel, "");
-  lv_obj_set_style_text_color(timeLabel, lv_color_hex(0x718096), LV_PART_MAIN);
-  lv_obj_set_style_text_font(timeLabel, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_obj_align(timeLabel, LV_ALIGN_BOTTOM_MID, 0, -4);
-
-  playPauseBtn = lv_button_create(scr);
-  lv_obj_set_width(playPauseBtn, 110);
-  lv_obj_set_height(playPauseBtn, 40);
-  lv_obj_align(playPauseBtn, LV_ALIGN_CENTER, -64, 46);
-  lv_obj_t *label = lv_label_create(playPauseBtn);
-  lv_label_set_text(label, "Play");
-  lv_obj_set_style_bg_color(playPauseBtn, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-
-  lv_obj_t *nextBtn = lv_button_create(scr);
-  lv_obj_set_width(nextBtn, 110);
-  lv_obj_set_height(nextBtn, 40);
-  lv_obj_align(nextBtn, LV_ALIGN_CENTER, 64, 46);
-  label = lv_label_create(nextBtn);
-  lv_label_set_text(label, "Next");
-  lv_obj_set_style_bg_color(nextBtn, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-
-  lv_obj_t *hint = lv_label_create(scr);
-  lv_label_set_text(hint, "Rotate: Seek\nShort: Play/Pause\nLong: Next");
-  lv_obj_set_style_text_color(hint, lv_color_hex(0x718096), LV_PART_MAIN);
-  lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 4, -4);
-
-  screens[SCREEN_PLAYBACK] = scr;
-}
-
-void update_playback_screen() {
-  lv_label_set_text(trackLabel, playback.track);
-  lv_label_set_text(artistLabel, playback.artist);
-  
-  int mins = playback.position / 60;
-  int secs = playback.position % 60;
-  int dmins = playback.duration / 60;
-  int dsecs = playback.duration % 60;
-  lv_label_set_text_fmt(timeLabel, "%d:%02d / %d:%02d",
-    mins, secs, dmins, dsecs);
-
-  lv_label_set_text(lv_obj_get_child(playPauseBtn, 0),
-    playback.isPlaying ? "Pause" : "Play");
-}
-
-// =========================================================
-// Screen 5: System Info
-// =========================================================
-lv_obj_t *cpuLabel;
-lv_obj_t *ramLabel;
-lv_obj_t *tempLabel;
-
-void create_sysinfo_screen() {
-  lv_obj_t *scr = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), LV_PART_MAIN);
-
-  lv_obj_t *title = lv_label_create(scr);
-  lv_label_set_text(title, "System Info");
-  lv_obj_set_style_text_color(title, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
-
-  lv_obj_t *cpuTitleLabel = lv_label_create(scr);
-  lv_label_set_text(cpuTitleLabel, "CPU:");
-  lv_obj_set_style_text_color(cpuTitleLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(cpuTitleLabel, LV_ALIGN_TOP_LEFT, 20, 36);
-
-  cpuLabel = lv_label_create(scr);
-  lv_obj_set_style_text_color(cpuLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(cpuLabel, LV_ALIGN_TOP_LEFT, 20, 54);
-
-  lv_obj_t *ramTitleLabel = lv_label_create(scr);
-  lv_label_set_text(ramTitleLabel, "RAM:");
-  lv_obj_set_style_text_color(ramTitleLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(ramTitleLabel, LV_ALIGN_TOP_LEFT, 20, 86);
-
-  ramLabel = lv_label_create(scr);
-  lv_obj_set_style_text_color(ramLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(ramLabel, LV_ALIGN_TOP_LEFT, 20, 104);
-
-  lv_obj_t *tempTitleLabel = lv_label_create(scr);
-  lv_label_set_text(tempTitleLabel, "Temperature:");
-  lv_obj_set_style_text_color(tempTitleLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(tempTitleLabel, LV_ALIGN_TOP_LEFT, 20, 136);
-
-  tempLabel = lv_label_create(scr);
-  lv_obj_set_style_text_color(tempLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(tempLabel, LV_ALIGN_TOP_LEFT, 20, 154);
-
-  lv_obj_t *hint = lv_label_create(scr);
-  lv_label_set_text(hint, "Long press: Next tab");
-  lv_obj_set_style_text_color(hint, lv_color_hex(0x718096), LV_PART_MAIN);
-  lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 4, -4);
-
-  screens[SCREEN_SYSINFO] = scr;
-}
-
-void update_sysinfo_screen() {
-  lv_label_set_text_fmt(cpuLabel, "%.1f%% / GPU: %.1f%%", sysInfo.cpuLoad, sysInfo.gpuLoad);
-  lv_label_set_text_fmt(ramLabel, "%d / %d MB", sysInfo.ramUsed, sysInfo.ramTotal);
-  lv_label_set_text_fmt(tempLabel, "%d°C", sysInfo.tempCPU);
-}
-
-// =========================================================
 // Навигация между экранами
 // =========================================================
 void switch_screen(ScreenId newScreen) {
@@ -489,8 +316,6 @@ void switch_screen(ScreenId newScreen) {
   else if (currentScreen == SCREEN_VOLUME_APPS) update_volume_apps_screen();
   else if (currentScreen == SCREEN_DEVICES_OUTPUT) update_devices_output_screen();
   else if (currentScreen == SCREEN_DEVICES_INPUT) update_devices_input_screen();
-  else if (currentScreen == SCREEN_PLAYBACK) update_playback_screen();
-  else if (currentScreen == SCREEN_SYSINFO) update_sysinfo_screen();
 
   Serial.print("Screen: ");
   Serial.println(currentScreen);
@@ -564,10 +389,6 @@ void update_encoder_input() {
           appVolumes[selectedApp].volume = (appVolumes[selectedApp].volume == 0) ? 100 : 0;
           update_volume_apps_screen();
         }
-        else if (currentScreen == SCREEN_PLAYBACK) {
-          playback.isPlaying = !playback.isPlaying;
-          update_playback_screen();
-        }
       }
       encBtnPressed = false;
       encBtnLongPressDetected = false;
@@ -615,14 +436,6 @@ void update_encoder_input() {
       selectedInput = (selectedInput + delta + NUM_INPUT_DEVICES) % NUM_INPUT_DEVICES;
       update_devices_input_screen();
     }
-    else if (currentScreen == SCREEN_PLAYBACK) {
-      playback.position = constrain(playback.position + delta * 2, 0, playback.duration);
-      update_playback_screen();
-    }
-    else if (currentScreen == SCREEN_SYSINFO) {
-      sysInfo.cpuLoad = constrain(sysInfo.cpuLoad + delta * 2.5f, 0.0f, 100.0f);
-      update_sysinfo_screen();
-    }
   }
 }
 
@@ -632,7 +445,7 @@ void update_encoder_input() {
 void setup() {
   Serial.begin(115200);
   delay(800);
-  Serial.println("\n=== ФАЗА 1 v2: Multi-screen Volume Controller (6 tabs) ===");
+  Serial.println("\n=== ФАЗА 1 v2: Multi-screen Volume Controller (4 tabs) ===");
 
   gfx.init();
   gfx.setRotation(1);
@@ -671,8 +484,6 @@ void setup() {
   create_volume_apps_screen();
   create_devices_output_screen();
   create_devices_input_screen();
-  create_playback_screen();
-  create_sysinfo_screen();
 
   // Загружаем первый экран
   switch_screen(SCREEN_VOLUME_MASTER);
