@@ -57,3 +57,7 @@ Open the project in `VS Code` with `PlatformIO` and build the default environmen
 1. PC-side data collector script
 2. Serial protocol between PC and ESP32-S3
 3. Full integration and bug fixing
+
+
+
+
