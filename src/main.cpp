@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <lvgl.h>
+#include <RotaryEncoder.h>
 #include "my_display.hpp"
 
 LGFX gfx;
@@ -11,19 +12,22 @@ LGFX gfx;
 #define ENC_DT  41
 #define ENC_SW  42
 
-volatile int32_t encDelta = 0;
-volatile uint8_t lastClkState = 0;
+// Используем готовую библиотеку RotaryEncoder вместо ручного декодирования фаз.
+// Для нашего механического энкодера выбран режим FOUR3:
+// библиотека считает полный "щелчок" только в корректном latch-состоянии,
+// что обычно даёт более стабильное и предсказуемое поведение на KY-040.
+RotaryEncoder encoder(ENC_CLK, ENC_DT, RotaryEncoder::LatchMode::FOUR3);
 
+// Храним последнюю уже обработанную логическую позицию энкодера.
+// Библиотека внутри ведёт собственный счётчик, а мы на каждом цикле берём
+// разницу между новой и прошлой позицией, чтобы получить delta вращения.
+long lastEncoderPos = 0;
+
+// ISR теперь максимально лёгкий: никаких ручных вычислений направления,
+// никаких собственных volatile-счётчиков фазы.
+// На любое изменение CLK/DT просто просим библиотеку обновить своё состояние.
 void IRAM_ATTR encoderISR() {
-  uint8_t clk = digitalRead(ENC_CLK);
-  if (clk != lastClkState) {
-    if (digitalRead(ENC_DT) != clk) {
-      encDelta++;
-    } else {
-      encDelta--;
-    }
-  }
-  lastClkState = clk;
+  encoder.tick();
 }
 
 bool encBtnPressed = false;
@@ -113,10 +117,16 @@ static uint32_t my_tick_get(void) {
 }
 
 static void encoder_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
-  noInterrupts();
-  int32_t delta = encDelta;
-  encDelta = 0;
-  interrupts();
+  // На случай, если LVGL опросил энкодер между аппаратными прерываниями,
+  // дополнительно вызываем tick() и здесь. Это не ломает логику, а только
+  // помогает не потерять переходы при редком опросе.
+  encoder.tick();
+
+  // Считываем текущую логическую позицию и переводим её в относительное смещение,
+  // которое ожидает LVGL в enc_diff.
+  long newPos = encoder.getPosition();
+  int32_t delta = (int32_t)(newPos - lastEncoderPos);
+  lastEncoderPos = newPos;
 
   data->enc_diff = (int16_t)delta;
   data->state = LV_INDEV_STATE_RELEASED;
@@ -359,6 +369,11 @@ void splash_screen() {
 // Опрос энкодера + обработка событий
 // =========================================================
 void update_encoder_input() {
+  // Дополнительный poll в основном цикле.
+  // Даже при использовании прерываний это полезно как страховка и не мешает
+  // библиотеке, потому что tick() просто синхронизирует текущее состояние входов.
+  encoder.tick();
+
   // Дебаунс кнопки
   bool rawPressed = (digitalRead(ENC_SW) == LOW);
   uint32_t now = millis();
@@ -408,10 +423,17 @@ void update_encoder_input() {
   }
 
   // Вращение энкодера
-  noInterrupts();
-  int32_t delta = encDelta;
-  encDelta = 0;
-  interrupts();
+  // Берём абсолютную позицию из библиотеки и сами преобразуем её в delta.
+  // Это даёт нам единый источник истины и убирает старую ручную ISR-логику,
+  // где мы отдельно хранили промежуточные шаги и состояние CLK.
+  long newPos = encoder.getPosition();
+  int32_t delta = (int32_t)(newPos - lastEncoderPos);
+
+  if (delta != 0) {
+    // Обновляем lastEncoderPos только после фактической обработки изменения,
+    // чтобы следующий проход цикла не получил ту же самую дельту повторно.
+    lastEncoderPos = newPos;
+  }
 
   if (delta != 0) {
     if (currentScreen == SCREEN_VOLUME_MASTER) {
@@ -456,8 +478,16 @@ void setup() {
   pinMode(ENC_DT, INPUT_PULLUP);
   pinMode(ENC_SW, INPUT_PULLUP);
 
-  lastClkState = digitalRead(ENC_CLK);
+  // Сразу синхронизируем внутреннее состояние библиотеки с реальными уровнями
+  // на ножках после включения МК. Это защищает от ложного первого шага.
+  encoder.tick();
+  lastEncoderPos = encoder.getPosition();
+
+  // Подписываемся на оба сигнала энкодера.
+  // При любом изменении просто вызывается encoderISR(), а уже библиотека
+  // корректно вычисляет направление и новую позицию.
   attachInterrupt(digitalPinToInterrupt(ENC_CLK), encoderISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_DT), encoderISR, CHANGE);
 
   // LVGL
   lv_init();
