@@ -1,7 +1,7 @@
 #pragma once
 
 // =========================================================
-// Конфигурация LovyanGFX для ST7789V3 240x280 на ESP32-S3.
+// Конфигурация LovyanGFX для ST7789V3 280x240 (landscape) на ESP32-S3.
 // Распиновка - финальная, проверенная на железе:
 //   SCLK=12, MOSI=11 (дефолтный аппаратный SPI2/FSPI)
 //   RST=17, DC=18, CS=10, BLK=8 (HIGH = подсветка включена)
@@ -43,9 +43,9 @@ public:
       cfg.memory_width  = 240;
       cfg.memory_height = 320;  // физический буфер контроллера ST7789
       cfg.panel_width    = 240;
-      cfg.panel_height   = 280; // реальная видимая область нашей панели
+      cfg.panel_height   = 280; // физическая видимая область до поворота
       cfg.offset_x = 0;
-      cfg.offset_y = 20;         // если изображение смещено - подправим тут
+      cfg.offset_y = 20;         // проверенное смещение для этой панели
       cfg.offset_rotation = 0;
 
       cfg.dummy_read_pixel = 8;

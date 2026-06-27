@@ -35,8 +35,8 @@ const uint32_t ENC_LONG_PRESS_MS = 600; // скоро будет долгое н
 
 bool encBtnLongPressDetected = false;
 
-static const uint32_t SCR_W = 240;
-static const uint32_t SCR_H = 280;
+static const uint32_t SCR_W = 280;
+static const uint32_t SCR_H = 240;
 static const uint32_t BUF_LINES = 30;
 static lv_color_t draw_buf[SCR_W * BUF_LINES];
 
@@ -169,8 +169,8 @@ void create_volume_master_screen() {
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
 
   volumeMasterSlider = lv_slider_create(scr);
-  lv_obj_set_width(volumeMasterSlider, 200);
-  lv_obj_align(volumeMasterSlider, LV_ALIGN_TOP_MID, 0, 60);
+  lv_obj_set_width(volumeMasterSlider, 236);
+  lv_obj_align(volumeMasterSlider, LV_ALIGN_TOP_MID, 0, 54);
   lv_slider_set_range(volumeMasterSlider, 0, 100);
   lv_slider_set_value(volumeMasterSlider, appVolumes[0].volume, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(volumeMasterSlider, lv_color_hex(0x4FD1C5), LV_PART_INDICATOR);
@@ -179,7 +179,7 @@ void create_volume_master_screen() {
   lv_label_set_text_fmt(volumeMasterLabel, "%d%%", appVolumes[0].volume);
   lv_obj_set_style_text_color(volumeMasterLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(volumeMasterLabel, &lv_font_montserrat_32, LV_PART_MAIN);
-  lv_obj_align(volumeMasterLabel, LV_ALIGN_CENTER, 0, 40);
+  lv_obj_align(volumeMasterLabel, LV_ALIGN_CENTER, 0, 28);
 
   lv_obj_t *hint = lv_label_create(scr);
   lv_label_set_text(hint, "Rotate: Volume\nShort: Mute\nLong: Next");
@@ -221,23 +221,23 @@ void create_volume_apps_screen() {
   appListLabel = lv_label_create(scr);
   lv_obj_set_style_text_color(appListLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(appListLabel, &lv_font_montserrat_12, LV_PART_MAIN);
-  lv_obj_align(appListLabel, LV_ALIGN_TOP_LEFT, 16, 55);
+  lv_obj_align(appListLabel, LV_ALIGN_TOP_LEFT, 16, 52);
 
   // Volume slider
   lv_obj_t *volLabel = lv_label_create(scr);
   lv_label_set_text(volLabel, "Volume:");
   lv_obj_set_style_text_color(volLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(volLabel, LV_ALIGN_TOP_LEFT, 16, 130);
+  lv_obj_align(volLabel, LV_ALIGN_TOP_LEFT, 16, 122);
 
   appVolumeSlider = lv_slider_create(scr);
-  lv_obj_set_width(appVolumeSlider, 200);
-  lv_obj_align(appVolumeSlider, LV_ALIGN_TOP_MID, 0, 150);
+  lv_obj_set_width(appVolumeSlider, 236);
+  lv_obj_align(appVolumeSlider, LV_ALIGN_TOP_MID, 0, 144);
   lv_slider_set_range(appVolumeSlider, 0, 100);
   lv_obj_set_style_bg_color(appVolumeSlider, lv_color_hex(0x4FD1C5), LV_PART_INDICATOR);
 
   appVolumeLabel = lv_label_create(scr);
   lv_obj_set_style_text_color(appVolumeLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(appVolumeLabel, LV_ALIGN_TOP_RIGHT, -16, 130);
+  lv_obj_align(appVolumeLabel, LV_ALIGN_TOP_RIGHT, -16, 122);
 
   lv_obj_t *hint = lv_label_create(scr);
   lv_label_set_text(hint, "Rotate: Choose/Vol\nShort: Mute\nLong: Next");
@@ -279,7 +279,7 @@ void create_devices_output_screen() {
   outputListLabel = lv_label_create(scr);
   lv_obj_set_style_text_color(outputListLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(outputListLabel, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_align(outputListLabel, LV_ALIGN_TOP_MID, 0, 50);
+  lv_obj_align(outputListLabel, LV_ALIGN_TOP_LEFT, 24, 52);
 
   lv_obj_t *hint = lv_label_create(scr);
   lv_label_set_text(hint, "Rotate: Select\nShort: Confirm\nLong: Next");
@@ -316,7 +316,7 @@ void create_devices_input_screen() {
   inputListLabel = lv_label_create(scr);
   lv_obj_set_style_text_color(inputListLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(inputListLabel, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_align(inputListLabel, LV_ALIGN_TOP_MID, 0, 50);
+  lv_obj_align(inputListLabel, LV_ALIGN_TOP_LEFT, 24, 52);
 
   lv_obj_t *hint = lv_label_create(scr);
   lv_label_set_text(hint, "Rotate: Select\nShort: Confirm\nLong: Next");
@@ -354,9 +354,9 @@ void create_playback_screen() {
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
 
   lv_obj_t *infoBox = lv_obj_create(scr);
-  lv_obj_set_width(infoBox, 220);
-  lv_obj_set_height(infoBox, 100);
-  lv_obj_align(infoBox, LV_ALIGN_TOP_MID, 0, 35);
+  lv_obj_set_width(infoBox, 248);
+  lv_obj_set_height(infoBox, 88);
+  lv_obj_align(infoBox, LV_ALIGN_TOP_MID, 0, 34);
   lv_obj_set_style_bg_color(infoBox, lv_color_hex(0x1A202C), LV_PART_MAIN);
   lv_obj_set_style_border_color(infoBox, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
   lv_obj_set_style_border_width(infoBox, 2, LV_PART_MAIN);
@@ -380,17 +380,17 @@ void create_playback_screen() {
   lv_obj_align(timeLabel, LV_ALIGN_BOTTOM_MID, 0, -4);
 
   playPauseBtn = lv_button_create(scr);
-  lv_obj_set_width(playPauseBtn, 100);
+  lv_obj_set_width(playPauseBtn, 110);
   lv_obj_set_height(playPauseBtn, 40);
-  lv_obj_align(playPauseBtn, LV_ALIGN_CENTER, -70, 40);
+  lv_obj_align(playPauseBtn, LV_ALIGN_CENTER, -64, 46);
   lv_obj_t *label = lv_label_create(playPauseBtn);
   lv_label_set_text(label, "Play");
   lv_obj_set_style_bg_color(playPauseBtn, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
 
   lv_obj_t *nextBtn = lv_button_create(scr);
-  lv_obj_set_width(nextBtn, 100);
+  lv_obj_set_width(nextBtn, 110);
   lv_obj_set_height(nextBtn, 40);
-  lv_obj_align(nextBtn, LV_ALIGN_CENTER, 70, 40);
+  lv_obj_align(nextBtn, LV_ALIGN_CENTER, 64, 46);
   label = lv_label_create(nextBtn);
   lv_label_set_text(label, "Next");
   lv_obj_set_style_bg_color(nextBtn, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
@@ -439,29 +439,29 @@ void create_sysinfo_screen() {
   lv_obj_t *cpuTitleLabel = lv_label_create(scr);
   lv_label_set_text(cpuTitleLabel, "CPU:");
   lv_obj_set_style_text_color(cpuTitleLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(cpuTitleLabel, LV_ALIGN_TOP_LEFT, 16, 35);
+  lv_obj_align(cpuTitleLabel, LV_ALIGN_TOP_LEFT, 20, 36);
 
   cpuLabel = lv_label_create(scr);
   lv_obj_set_style_text_color(cpuLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(cpuLabel, LV_ALIGN_TOP_LEFT, 16, 50);
+  lv_obj_align(cpuLabel, LV_ALIGN_TOP_LEFT, 20, 54);
 
   lv_obj_t *ramTitleLabel = lv_label_create(scr);
   lv_label_set_text(ramTitleLabel, "RAM:");
   lv_obj_set_style_text_color(ramTitleLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(ramTitleLabel, LV_ALIGN_TOP_LEFT, 16, 85);
+  lv_obj_align(ramTitleLabel, LV_ALIGN_TOP_LEFT, 20, 86);
 
   ramLabel = lv_label_create(scr);
   lv_obj_set_style_text_color(ramLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(ramLabel, LV_ALIGN_TOP_LEFT, 16, 100);
+  lv_obj_align(ramLabel, LV_ALIGN_TOP_LEFT, 20, 104);
 
   lv_obj_t *tempTitleLabel = lv_label_create(scr);
   lv_label_set_text(tempTitleLabel, "Temperature:");
   lv_obj_set_style_text_color(tempTitleLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(tempTitleLabel, LV_ALIGN_TOP_LEFT, 16, 135);
+  lv_obj_align(tempTitleLabel, LV_ALIGN_TOP_LEFT, 20, 136);
 
   tempLabel = lv_label_create(scr);
   lv_obj_set_style_text_color(tempLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(tempLabel, LV_ALIGN_TOP_LEFT, 16, 150);
+  lv_obj_align(tempLabel, LV_ALIGN_TOP_LEFT, 20, 154);
 
   lv_obj_t *hint = lv_label_create(scr);
   lv_label_set_text(hint, "Long press: Next tab");
@@ -635,7 +635,7 @@ void setup() {
   Serial.println("\n=== ФАЗА 1 v2: Multi-screen Volume Controller (6 tabs) ===");
 
   gfx.init();
-  gfx.setRotation(0);
+  gfx.setRotation(1);
   gfx.setBrightness(255);
 
   // Энкодер
