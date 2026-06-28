@@ -26,7 +26,7 @@
 /*-------------------
  * Feature configuration
  *-----------------*/
-#define LV_USE_PERF_MONITOR 1      // показывает FPS/CPU встроенным виджетом LVGL
+#define LV_USE_PERF_MONITOR 0
 #define LV_USE_MEM_MONITOR 0
 
 #define LV_USE_LOG 1
@@ -71,6 +71,6 @@
 /*-------------------
  * Misc
  *-----------------*/
-#define LV_USE_SYSMON 1
+#define LV_USE_SYSMON 0
 
 #endif /*LV_CONF_H*/
