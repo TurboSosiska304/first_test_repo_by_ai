@@ -13,9 +13,8 @@ constexpr uint32_t BUF_LINES = 30;
 enum ScreenId {
   SCREEN_VOLUME_MASTER = 0,
   SCREEN_VOLUME_APPS = 1,
-  SCREEN_DEVICES_OUTPUT = 2,
-  SCREEN_DEVICES_INPUT = 3,
-  NUM_SCREENS = 4
+  SCREEN_SYSTEM_INFO = 2,
+  NUM_SCREENS = 3
 };
 
 // =========================================================
@@ -24,8 +23,4 @@ enum ScreenId {
 struct AppVolume {
   const char *name;
   int32_t volume;
-};
-
-struct Device {
-  const char *name;
 };

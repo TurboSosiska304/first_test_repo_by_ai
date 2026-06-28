@@ -1,510 +1,418 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <RotaryEncoder.h>
+
 #include "app_types.hpp"
-#include "system_init.hpp"
 #include "my_display.hpp"
+#include "system_init.hpp"
+
+namespace {
+
+constexpr int ENC_CLK = 40;
+constexpr int ENC_DT = 41;
+constexpr int ENC_SW = 42;
+
+constexpr uint32_t ENC_DEBOUNCE_MS = 30;
+constexpr uint32_t ENC_LONG_PRESS_MS = 600;
+
+constexpr uint32_t COLOR_BG = 0x101418;
+constexpr uint32_t COLOR_ACCENT = 0x4FD1C5;
+constexpr uint32_t COLOR_TEXT = 0xFFFFFF;
+constexpr uint32_t COLOR_MUTED = 0xA0AEC0;
+constexpr uint32_t COLOR_HINT = 0x718096;
 
 LGFX gfx;
-
-// =========================================================
-// Энкодер KY-040
-// =========================================================
-#define ENC_CLK 40
-#define ENC_DT  41
-#define ENC_SW  42
-
-// Используем готовую библиотеку RotaryEncoder вместо ручного декодирования фаз.
-// Для нашего механического энкодера выбран режим FOUR3:
-// библиотека считает полный "щелчок" только в корректном latch-состоянии,
-// что обычно даёт более стабильное и предсказуемое поведение на KY-040.
 RotaryEncoder encoder(ENC_CLK, ENC_DT, RotaryEncoder::LatchMode::FOUR3);
 
-// Храним последнюю уже обработанную логическую позицию энкодера.
-// Библиотека внутри ведёт собственный счётчик, а мы на каждом цикле берём
-// разницу между новой и прошлой позицией, чтобы получить delta вращения.
 long lastEncoderPos = 0;
-
-// ISR теперь максимально лёгкий: никаких ручных вычислений направления,
-// никаких собственных volatile-счётчиков фазы.
-// На любое изменение CLK/DT просто просим библиотеку обновить своё состояние.
-void IRAM_ATTR encoderISR() {
-  encoder.tick();
-}
 
 bool encBtnPressed = false;
 bool encBtnLastRaw = false;
+bool encBtnLongPressDetected = false;
 uint32_t encBtnLastChange = 0;
 uint32_t encBtnPressStart = 0;
-const uint32_t ENC_DEBOUNCE_MS = 30;
-const uint32_t ENC_LONG_PRESS_MS = 600; // скоро будет долгое нажатие
-
-bool encBtnLongPressDetected = false;
 
 static lv_color_t draw_buf[SCR_W * BUF_LINES];
 
-static lv_display_t *disp;
-static lv_indev_t *encoder_indev;
-static lv_group_t *encoder_group;
+static lv_display_t *disp = nullptr;
+static lv_indev_t *encoder_indev = nullptr;
+static lv_group_t *encoder_group = nullptr;
 
 ScreenId currentScreen = SCREEN_VOLUME_MASTER;
-lv_obj_t *screens[NUM_SCREENS];
+lv_obj_t *screens[NUM_SCREENS] = {nullptr};
 
 AppVolume appVolumes[] = {
-  {"Master", 100},
-  {"Discord", 75},
-  {"Spotify", 80},
-  {"Browser", 60},
+	{"Master", 100},
+	{"Discord", 75},
+	{"Spotify", 80},
+	{"Browser", 60},
 };
-const int NUM_APPS = 4;
-int selectedApp = 1; // начнём с Discord, не Master
 
-Device outputDevices[] = {
-  {"Speakers"},
-  {"Headphones"},
-};
-const int NUM_OUTPUT_DEVICES = 2;
-int selectedOutput = 0;
+constexpr int NUM_APPS = sizeof(appVolumes) / sizeof(appVolumes[0]);
+int selectedApp = 1;
 
-Device inputDevices[] = {
-  {"Mic 1"},
-  {"Mic 2"},
-};
-const int NUM_INPUT_DEVICES = 2;
-int selectedInput = 0;
+lv_obj_t *volumeMasterSlider = nullptr;
+lv_obj_t *volumeMasterLabel = nullptr;
+lv_obj_t *appListLabel = nullptr;
+lv_obj_t *appVolumeSlider = nullptr;
+lv_obj_t *appVolumeLabel = nullptr;
+lv_obj_t *systemInfoLabel = nullptr;
 
-// =========================================================
-// LVGL Display & Input
-// =========================================================
-void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
-  uint32_t w = area->x2 - area->x1 + 1;
-  uint32_t h = area->y2 - area->y1 + 1;
-
-  gfx.startWrite();
-  gfx.setAddrWindow(area->x1, area->y1, w, h);
-  gfx.writePixels((lgfx::rgb565_t *)px_map, w * h);
-  gfx.endWrite();
-
-  lv_display_flush_ready(disp);
+uint32_t bytes_to_kb(size_t value) {
+	return static_cast<uint32_t>(value / 1024U);
 }
 
-static uint32_t my_tick_get(void) {
-  return millis();
+void IRAM_ATTR encoderISR() {
+	encoder.tick();
 }
 
-static void encoder_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
-  // На случай, если LVGL опросил энкодер между аппаратными прерываниями,
-  // дополнительно вызываем tick() и здесь. Это не ломает логику, а только
-  // помогает не потерять переходы при редком опросе.
-  encoder.tick();
-
-  // Считываем текущую логическую позицию и переводим её в относительное смещение,
-  // которое ожидает LVGL в enc_diff.
-  long newPos = encoder.getPosition();
-  int32_t delta = (int32_t)(newPos - lastEncoderPos);
-  lastEncoderPos = newPos;
-
-  data->enc_diff = (int16_t)delta;
-  data->state = LV_INDEV_STATE_RELEASED;
+static uint32_t my_tick_get() {
+	return millis();
 }
 
-// =========================================================
-// Screen 0: Volume Master
-// =========================================================
-lv_obj_t *volumeMasterSlider;
-lv_obj_t *volumeMasterLabel;
+void my_disp_flush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map) {
+	uint32_t width = area->x2 - area->x1 + 1;
+	uint32_t height = area->y2 - area->y1 + 1;
 
-void create_volume_master_screen() {
-  lv_obj_t *scr = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), LV_PART_MAIN);
+	gfx.startWrite();
+	gfx.setAddrWindow(area->x1, area->y1, width, height);
+	gfx.writePixels(reinterpret_cast<lgfx::rgb565_t *>(px_map), width * height);
+	gfx.endWrite();
 
-  lv_obj_t *title = lv_label_create(scr);
-  lv_label_set_text(title, "Master Volume");
-  lv_obj_set_style_text_color(title, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
+	lv_display_flush_ready(display);
+}
 
-  volumeMasterSlider = lv_slider_create(scr);
-  lv_obj_set_width(volumeMasterSlider, 236);
-  lv_obj_align(volumeMasterSlider, LV_ALIGN_TOP_MID, 0, 54);
-  lv_slider_set_range(volumeMasterSlider, 0, 100);
-  lv_slider_set_value(volumeMasterSlider, appVolumes[0].volume, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(volumeMasterSlider, lv_color_hex(0x4FD1C5), LV_PART_INDICATOR);
+void encoder_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
+	(void)indev;
 
-  volumeMasterLabel = lv_label_create(scr);
-  lv_label_set_text_fmt(volumeMasterLabel, "%d%%", appVolumes[0].volume);
-  lv_obj_set_style_text_color(volumeMasterLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(volumeMasterLabel, &lv_font_montserrat_32, LV_PART_MAIN);
-  lv_obj_align(volumeMasterLabel, LV_ALIGN_CENTER, 0, 28);
+	encoder.tick();
 
-  lv_obj_t *hint = lv_label_create(scr);
-  lv_label_set_text(hint, "Rotate: Volume\nShort: Mute\nLong: Next");
-  lv_obj_set_style_text_color(hint, lv_color_hex(0x718096), LV_PART_MAIN);
-  lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+	long newPos = encoder.getPosition();
+	int32_t delta = static_cast<int32_t>(newPos - lastEncoderPos);
+	lastEncoderPos = newPos;
 
-  screens[SCREEN_VOLUME_MASTER] = scr;
+	data->enc_diff = static_cast<int16_t>(delta);
+	data->state = LV_INDEV_STATE_RELEASED;
+}
+
+lv_obj_t *create_base_screen(const char *titleText, const char *hintText) {
+	lv_obj_t *scr = lv_obj_create(nullptr);
+	lv_obj_set_style_bg_color(scr, lv_color_hex(COLOR_BG), LV_PART_MAIN);
+	lv_obj_set_style_border_width(scr, 0, LV_PART_MAIN);
+	lv_obj_set_style_radius(scr, 0, LV_PART_MAIN);
+	lv_obj_set_style_pad_all(scr, 0, LV_PART_MAIN);
+
+	lv_obj_t *title = lv_label_create(scr);
+	lv_label_set_text(title, titleText);
+	lv_obj_set_style_text_color(title, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
+	lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
+
+	lv_obj_t *hint = lv_label_create(scr);
+	lv_label_set_text(hint, hintText);
+	lv_obj_set_style_text_color(hint, lv_color_hex(COLOR_HINT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
+	lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+
+	return scr;
 }
 
 void update_volume_master_screen() {
-  lv_slider_set_value(volumeMasterSlider, appVolumes[0].volume, LV_ANIM_OFF);
-  lv_label_set_text_fmt(volumeMasterLabel, "%d%%", appVolumes[0].volume);
+	lv_slider_set_value(volumeMasterSlider, appVolumes[0].volume, LV_ANIM_OFF);
+	lv_label_set_text_fmt(volumeMasterLabel, "%d%%", appVolumes[0].volume);
 }
 
-// =========================================================
-// Screen 1: Volume Apps
-// =========================================================
-lv_obj_t *appListLabel;
-lv_obj_t *appVolumeSlider;
-lv_obj_t *appVolumeLabel;
+void create_volume_master_screen() {
+	lv_obj_t *scr = create_base_screen(
+		"Master Volume",
+		"Rotate: Volume\nShort: Mute\nLong: Next"
+	);
 
-void create_volume_apps_screen() {
-  lv_obj_t *scr = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), LV_PART_MAIN);
+	volumeMasterSlider = lv_slider_create(scr);
+	lv_obj_set_width(volumeMasterSlider, 236);
+	lv_obj_align(volumeMasterSlider, LV_ALIGN_TOP_MID, 0, 54);
+	lv_slider_set_range(volumeMasterSlider, 0, 100);
+	lv_obj_set_style_bg_color(volumeMasterSlider, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
 
-  lv_obj_t *title = lv_label_create(scr);
-  lv_label_set_text(title, "App Volume");
-  lv_obj_set_style_text_color(title, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
+	volumeMasterLabel = lv_label_create(scr);
+	lv_obj_set_style_text_color(volumeMasterLabel, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(volumeMasterLabel, &lv_font_montserrat_32, LV_PART_MAIN);
+	lv_obj_align(volumeMasterLabel, LV_ALIGN_CENTER, 0, 28);
 
-  lv_obj_t *appLabel = lv_label_create(scr);
-  lv_label_set_text(appLabel, "Select app:");
-  lv_obj_set_style_text_color(appLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(appLabel, LV_ALIGN_TOP_LEFT, 16, 35);
-
-  // App list с стрелочкой для выбора
-  appListLabel = lv_label_create(scr);
-  lv_obj_set_style_text_color(appListLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(appListLabel, &lv_font_montserrat_12, LV_PART_MAIN);
-  lv_obj_align(appListLabel, LV_ALIGN_TOP_LEFT, 16, 52);
-
-  // Volume slider
-  lv_obj_t *volLabel = lv_label_create(scr);
-  lv_label_set_text(volLabel, "Volume:");
-  lv_obj_set_style_text_color(volLabel, lv_color_hex(0xA0AEC0), LV_PART_MAIN);
-  lv_obj_align(volLabel, LV_ALIGN_TOP_LEFT, 16, 122);
-
-  appVolumeSlider = lv_slider_create(scr);
-  lv_obj_set_width(appVolumeSlider, 236);
-  lv_obj_align(appVolumeSlider, LV_ALIGN_TOP_MID, 0, 144);
-  lv_slider_set_range(appVolumeSlider, 0, 100);
-  lv_obj_set_style_bg_color(appVolumeSlider, lv_color_hex(0x4FD1C5), LV_PART_INDICATOR);
-
-  appVolumeLabel = lv_label_create(scr);
-  lv_obj_set_style_text_color(appVolumeLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_align(appVolumeLabel, LV_ALIGN_TOP_RIGHT, -16, 122);
-
-  lv_obj_t *hint = lv_label_create(scr);
-  lv_label_set_text(hint, "Rotate: Choose/Vol\nShort: Mute\nLong: Next");
-  lv_obj_set_style_text_color(hint, lv_color_hex(0x718096), LV_PART_MAIN);
-  lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 4, -4);
-
-  screens[SCREEN_VOLUME_APPS] = scr;
+	screens[SCREEN_VOLUME_MASTER] = scr;
+	update_volume_master_screen();
 }
 
 void update_volume_apps_screen() {
-  // Отобразим приложения кроме Master (индексы 1-3)
-  lv_label_set_text_fmt(appListLabel,
-    "%s %s\n%s %s\n%s %s",
-    (selectedApp == 1) ? "→" : " ", appVolumes[1].name,
-    (selectedApp == 2) ? "→" : " ", appVolumes[2].name,
-    (selectedApp == 3) ? "→" : " ", appVolumes[3].name
-  );
+	lv_label_set_text_fmt(
+		appListLabel,
+		"%s %s\n%s %s\n%s %s",
+		(selectedApp == 1) ? "→" : " ", appVolumes[1].name,
+		(selectedApp == 2) ? "→" : " ", appVolumes[2].name,
+		(selectedApp == 3) ? "→" : " ", appVolumes[3].name
+	);
 
-  lv_slider_set_value(appVolumeSlider, appVolumes[selectedApp].volume, LV_ANIM_OFF);
-  lv_label_set_text_fmt(appVolumeLabel, "%d%%", appVolumes[selectedApp].volume);
+	lv_slider_set_value(appVolumeSlider, appVolumes[selectedApp].volume, LV_ANIM_OFF);
+	lv_label_set_text_fmt(appVolumeLabel, "%d%%", appVolumes[selectedApp].volume);
 }
 
-// =========================================================
-// Screen 2: Devices Output
-// =========================================================
-lv_obj_t *outputListLabel;
+void create_volume_apps_screen() {
+	lv_obj_t *scr = create_base_screen(
+		"App Volume",
+		"Rotate: Choose/Vol\nShort: Mute\nLong: Next"
+	);
 
-void create_devices_output_screen() {
-  lv_obj_t *scr = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), LV_PART_MAIN);
+	lv_obj_t *appLabel = lv_label_create(scr);
+	lv_label_set_text(appLabel, "Select app:");
+	lv_obj_set_style_text_color(appLabel, lv_color_hex(COLOR_MUTED), LV_PART_MAIN);
+	lv_obj_set_style_text_font(appLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+	lv_obj_align(appLabel, LV_ALIGN_TOP_LEFT, 16, 35);
 
-  lv_obj_t *title = lv_label_create(scr);
-  lv_label_set_text(title, "Output Device");
-  lv_obj_set_style_text_color(title, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
+	appListLabel = lv_label_create(scr);
+	lv_obj_set_style_text_color(appListLabel, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(appListLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+	lv_obj_align(appListLabel, LV_ALIGN_TOP_LEFT, 16, 56);
 
-  outputListLabel = lv_label_create(scr);
-  lv_obj_set_style_text_color(outputListLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(outputListLabel, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_align(outputListLabel, LV_ALIGN_TOP_LEFT, 24, 52);
+	lv_obj_t *volLabel = lv_label_create(scr);
+	lv_label_set_text(volLabel, "Volume:");
+	lv_obj_set_style_text_color(volLabel, lv_color_hex(COLOR_MUTED), LV_PART_MAIN);
+	lv_obj_set_style_text_font(volLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+	lv_obj_align(volLabel, LV_ALIGN_TOP_LEFT, 16, 128);
 
-  lv_obj_t *hint = lv_label_create(scr);
-  lv_label_set_text(hint, "Rotate: Select\nShort: Confirm\nLong: Next");
-  lv_obj_set_style_text_color(hint, lv_color_hex(0x718096), LV_PART_MAIN);
-  lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+	appVolumeLabel = lv_label_create(scr);
+	lv_obj_set_style_text_color(appVolumeLabel, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(appVolumeLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+	lv_obj_align(appVolumeLabel, LV_ALIGN_TOP_RIGHT, -16, 128);
 
-  screens[SCREEN_DEVICES_OUTPUT] = scr;
+	appVolumeSlider = lv_slider_create(scr);
+	lv_obj_set_width(appVolumeSlider, 236);
+	lv_obj_align(appVolumeSlider, LV_ALIGN_TOP_MID, 0, 152);
+	lv_slider_set_range(appVolumeSlider, 0, 100);
+	lv_obj_set_style_bg_color(appVolumeSlider, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR);
+
+	screens[SCREEN_VOLUME_APPS] = scr;
+	update_volume_apps_screen();
 }
 
-void update_devices_output_screen() {
-  lv_label_set_text_fmt(outputListLabel,
-    "%s %s\n\n%s %s",
-    (selectedOutput == 0) ? "→" : " ", outputDevices[0].name,
-    (selectedOutput == 1) ? "→" : " ", outputDevices[1].name
-  );
+void update_system_info_screen() {
+	SystemMemoryInfo info = get_system_memory_info();
+
+	lv_label_set_text_fmt(
+		systemInfoLabel,
+		"Heap total : %u KB\n"
+		"Heap free  : %u KB\n"
+		"Heap min   : %u KB\n"
+		"Heap block : %u KB\n"
+		"\n"
+		"PSRAM      : %s\n"
+		"PSRAM total: %u KB\n"
+		"PSRAM free : %u KB\n"
+		"PSRAM block: %u KB\n"
+		"\n"
+		"Flash size : %u KB\n"
+		"Sketch size: %u KB\n"
+		"Free space : %u KB",
+		bytes_to_kb(info.heapTotal),
+		bytes_to_kb(info.heapFree),
+		bytes_to_kb(info.heapMinFree),
+		bytes_to_kb(info.heapLargestBlock),
+		info.psramAvailable ? "OK" : "N/A",
+		bytes_to_kb(info.psramTotal),
+		bytes_to_kb(info.psramFree),
+		bytes_to_kb(info.psramLargestBlock),
+		bytes_to_kb(info.flashSize),
+		bytes_to_kb(info.sketchSize),
+		bytes_to_kb(info.freeSketchSpace)
+	);
 }
 
-// =========================================================
-// Screen 3: Devices Input
-// =========================================================
-lv_obj_t *inputListLabel;
+void create_system_info_screen() {
+	lv_obj_t *scr = create_base_screen(
+		"System Memory",
+		"Rotate: No action\nShort: Refresh\nLong: Next"
+	);
 
-void create_devices_input_screen() {
-  lv_obj_t *scr = lv_obj_create(NULL);
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), LV_PART_MAIN);
+	systemInfoLabel = lv_label_create(scr);
+	lv_obj_set_width(systemInfoLabel, 248);
+	lv_label_set_long_mode(systemInfoLabel, LV_LABEL_LONG_WRAP);
+	lv_obj_set_style_text_color(systemInfoLabel, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(systemInfoLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+	lv_obj_align(systemInfoLabel, LV_ALIGN_TOP_LEFT, 16, 40);
 
-  lv_obj_t *title = lv_label_create(scr);
-  lv_label_set_text(title, "Input Device");
-  lv_obj_set_style_text_color(title, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
-
-  inputListLabel = lv_label_create(scr);
-  lv_obj_set_style_text_color(inputListLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(inputListLabel, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_align(inputListLabel, LV_ALIGN_TOP_LEFT, 24, 52);
-
-  lv_obj_t *hint = lv_label_create(scr);
-  lv_label_set_text(hint, "Rotate: Select\nShort: Confirm\nLong: Next");
-  lv_obj_set_style_text_color(hint, lv_color_hex(0x718096), LV_PART_MAIN);
-  lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 4, -4);
-
-  screens[SCREEN_DEVICES_INPUT] = scr;
+	screens[SCREEN_SYSTEM_INFO] = scr;
+	update_system_info_screen();
 }
 
-void update_devices_input_screen() {
-  lv_label_set_text_fmt(inputListLabel,
-    "%s %s\n\n%s %s",
-    (selectedInput == 0) ? "→" : " ", inputDevices[0].name,
-    (selectedInput == 1) ? "→" : " ", inputDevices[1].name
-  );
-}
-
-// =========================================================
-// Навигация между экранами
-// =========================================================
 void switch_screen(ScreenId newScreen) {
-  currentScreen = newScreen;
-  lv_screen_load(screens[currentScreen]);
-  
-  if (currentScreen == SCREEN_VOLUME_MASTER) update_volume_master_screen();
-  else if (currentScreen == SCREEN_VOLUME_APPS) update_volume_apps_screen();
-  else if (currentScreen == SCREEN_DEVICES_OUTPUT) update_devices_output_screen();
-  else if (currentScreen == SCREEN_DEVICES_INPUT) update_devices_input_screen();
+	currentScreen = newScreen;
+	lv_screen_load(screens[currentScreen]);
 
-  Serial.print("Screen: ");
-  Serial.println(currentScreen);
+	if (currentScreen == SCREEN_VOLUME_MASTER) {
+		update_volume_master_screen();
+	} else if (currentScreen == SCREEN_VOLUME_APPS) {
+		update_volume_apps_screen();
+	} else if (currentScreen == SCREEN_SYSTEM_INFO) {
+		update_system_info_screen();
+	}
+
+	Serial.print("Screen: ");
+	Serial.println(static_cast<int>(currentScreen));
 }
 
-// =========================================================
-// Splash screen
-// =========================================================
 void splash_screen() {
-  uint16_t colors[] = {
-    0xF800, // red
-    0x07E0, // green
-    0x001F, // blue
-    0xFFE0, // yellow
-    0xF81F, // magenta
-    0x07FF, // cyan
-  };
+	uint16_t colors[] = {
+		0xF800,
+		0x07E0,
+		0x001F,
+	};
 
-  for (int i = 0; i < 3; i++) {
-    gfx.fillScreen(colors[i]);
-    delay(300);
-  }
+	for (uint8_t i = 0; i < 3; ++i) {
+		gfx.fillScreen(colors[i]);
+		delay(250);
+	}
 
-  gfx.fillScreen(0x0000); // black
-  delay(100);
+	gfx.fillScreen(0x0000);
+	delay(80);
 
-  // Выводим "HELLO)" большими буквами в центре
-  lv_obj_t *label = lv_label_create(lv_screen_active());
-  lv_label_set_text(label, "HELLO)");
-  lv_obj_set_style_text_color(label, lv_color_hex(0x4FD1C5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label, &lv_font_montserrat_32, LV_PART_MAIN);
-  lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-  lv_timer_handler();
+	lv_obj_t *label = lv_label_create(lv_screen_active());
+	lv_label_set_text(label, "HELLO)");
+	lv_obj_set_style_text_color(label, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(label, &lv_font_montserrat_32, LV_PART_MAIN);
+	lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+	lv_timer_handler();
 
-  delay(1500);
-
-  lv_obj_del(label);
+	delay(1200);
+	lv_obj_del(label);
 }
 
-// =========================================================
-// Опрос энкодера + обработка событий
-// =========================================================
+void handle_short_press() {
+	if (currentScreen == SCREEN_VOLUME_MASTER) {
+		appVolumes[0].volume = (appVolumes[0].volume == 0) ? 100 : 0;
+		update_volume_master_screen();
+	} else if (currentScreen == SCREEN_VOLUME_APPS) {
+		appVolumes[selectedApp].volume = (appVolumes[selectedApp].volume == 0) ? 100 : 0;
+		update_volume_apps_screen();
+	} else if (currentScreen == SCREEN_SYSTEM_INFO) {
+		update_system_info_screen();
+	}
+}
+
+void handle_rotation_delta(int32_t delta) {
+	if (delta == 0) {
+		return;
+	}
+
+	if (currentScreen == SCREEN_VOLUME_MASTER) {
+		appVolumes[0].volume = constrain(appVolumes[0].volume + delta * 5, 0, 100);
+		update_volume_master_screen();
+		return;
+	}
+
+	if (currentScreen == SCREEN_VOLUME_APPS) {
+		if (delta > 0) {
+			selectedApp = (selectedApp % (NUM_APPS - 1)) + 1;
+		} else {
+			selectedApp = (selectedApp - 2 + (NUM_APPS - 1)) % (NUM_APPS - 1) + 1;
+		}
+
+		appVolumes[selectedApp].volume = constrain(appVolumes[selectedApp].volume + delta * 3, 0, 100);
+		update_volume_apps_screen();
+	}
+}
+
 void update_encoder_input() {
-  // Дополнительный poll в основном цикле.
-  // Даже при использовании прерываний это полезно как страховка и не мешает
-  // библиотеке, потому что tick() просто синхронизирует текущее состояние входов.
-  encoder.tick();
+	encoder.tick();
 
-  // Дебаунс кнопки
-  bool rawPressed = (digitalRead(ENC_SW) == LOW);
-  uint32_t now = millis();
+	bool rawPressed = (digitalRead(ENC_SW) == LOW);
+	uint32_t now = millis();
 
-  if (rawPressed != encBtnLastRaw) {
-    encBtnLastChange = now;
-    encBtnLastRaw = rawPressed;
-  }
+	if (rawPressed != encBtnLastRaw) {
+		encBtnLastRaw = rawPressed;
+		encBtnLastChange = now;
+	}
 
-  if (now - encBtnLastChange > ENC_DEBOUNCE_MS) {
-    if (rawPressed && !encBtnPressed) {
-      // Нажата
-      encBtnPressStart = now;
-      encBtnPressed = true;
-      encBtnLongPressDetected = false;
-    } else if (!rawPressed && encBtnPressed) {
-      // Отпущена
-      uint32_t pressDuration = now - encBtnPressStart;
-      if (!encBtnLongPressDetected && pressDuration < ENC_LONG_PRESS_MS) {
-        // Было короткое нажатие
-        Serial.println("Short press");
-        
-        if (currentScreen == SCREEN_VOLUME_MASTER) {
-          appVolumes[0].volume = (appVolumes[0].volume == 0) ? 100 : 0;
-          update_volume_master_screen();
-        }
-        else if (currentScreen == SCREEN_VOLUME_APPS) {
-          appVolumes[selectedApp].volume = (appVolumes[selectedApp].volume == 0) ? 100 : 0;
-          update_volume_apps_screen();
-        }
-      }
-      encBtnPressed = false;
-      encBtnLongPressDetected = false;
-    }
-  }
+	if ((now - encBtnLastChange) > ENC_DEBOUNCE_MS) {
+		if (rawPressed && !encBtnPressed) {
+			encBtnPressed = true;
+			encBtnPressStart = now;
+			encBtnLongPressDetected = false;
+		} else if (!rawPressed && encBtnPressed) {
+			if (!encBtnLongPressDetected && (now - encBtnPressStart) < ENC_LONG_PRESS_MS) {
+				handle_short_press();
+			}
 
-  // Проверяем долгое нажатие ДО отпускания
-  if (encBtnPressed && !encBtnLongPressDetected) {
-    uint32_t pressDuration = millis() - encBtnPressStart;
-    if (pressDuration > ENC_LONG_PRESS_MS) {
-      // Долгое нажатие обнаружено - СРАЗУ переходим
-      encBtnLongPressDetected = true;
-      Serial.println("Long press detected - switch tab");
-      currentScreen = (ScreenId)((currentScreen + 1) % NUM_SCREENS);
-      switch_screen(currentScreen);
-    }
-  }
+			encBtnPressed = false;
+			encBtnLongPressDetected = false;
+		}
+	}
 
-  // Вращение энкодера
-  // Берём абсолютную позицию из библиотеки и сами преобразуем её в delta.
-  // Это даёт нам единый источник истины и убирает старую ручную ISR-логику,
-  // где мы отдельно хранили промежуточные шаги и состояние CLK.
-  long newPos = encoder.getPosition();
-  int32_t delta = (int32_t)(newPos - lastEncoderPos);
+	if (encBtnPressed && !encBtnLongPressDetected && (now - encBtnPressStart) > ENC_LONG_PRESS_MS) {
+		encBtnLongPressDetected = true;
+		ScreenId nextScreen = static_cast<ScreenId>((static_cast<int>(currentScreen) + 1) % NUM_SCREENS);
+		switch_screen(nextScreen);
+	}
 
-  if (delta != 0) {
-    // Обновляем lastEncoderPos только после фактической обработки изменения,
-    // чтобы следующий проход цикла не получил ту же самую дельту повторно.
-    lastEncoderPos = newPos;
-  }
+	long newPos = encoder.getPosition();
+	int32_t delta = static_cast<int32_t>(newPos - lastEncoderPos);
 
-  if (delta != 0) {
-    if (currentScreen == SCREEN_VOLUME_MASTER) {
-      appVolumes[0].volume = constrain(appVolumes[0].volume + delta * 5, 0, 100);
-      update_volume_master_screen();
-    }
-    else if (currentScreen == SCREEN_VOLUME_APPS) {
-      // При вращении вверх - выбираем предыдущее приложение, вниз - следующее
-      if (delta > 0) {
-        selectedApp = (selectedApp + 1) % (NUM_APPS - 1) + 1; // циклим в диапазоне 1-3
-      } else {
-        selectedApp = (selectedApp - 1 + NUM_APPS - 1) % (NUM_APPS - 1) + 1;
-      }
-      appVolumes[selectedApp].volume = constrain(appVolumes[selectedApp].volume + delta * 3, 0, 100);
-      update_volume_apps_screen();
-    }
-    else if (currentScreen == SCREEN_DEVICES_OUTPUT) {
-      selectedOutput = (selectedOutput + delta + NUM_OUTPUT_DEVICES) % NUM_OUTPUT_DEVICES;
-      update_devices_output_screen();
-    }
-    else if (currentScreen == SCREEN_DEVICES_INPUT) {
-      selectedInput = (selectedInput + delta + NUM_INPUT_DEVICES) % NUM_INPUT_DEVICES;
-      update_devices_input_screen();
-    }
-  }
+	if (delta != 0) {
+		lastEncoderPos = newPos;
+		handle_rotation_delta(delta);
+	}
 }
 
-// =========================================================
-// Setup & Loop
-// =========================================================
+}  // namespace
+
 void setup() {
-  Serial.begin(115200);
-  delay(800);
-  Serial.println("\n=== ФАЗА 1 v2: Multi-screen Volume Controller (4 tabs) ===");
+	Serial.begin(115200);
+	delay(800);
+	Serial.println("\n=== Phase 1: Volume Controller UI ===");
 
-  // Ранняя инициализация системной памяти.
-  // Здесь поднимаем PSRAM, если она доступна на плате, и печатаем
-  // диагностическую информацию по heap/flash до запуска UI.
-  init_system_memory();
-  print_system_memory_info();
+	init_system_memory();
+	print_system_memory_info();
 
-  gfx.init();
-  gfx.setRotation(1);
-  gfx.setBrightness(255);
+	gfx.init();
+	gfx.setRotation(1);
+	gfx.setBrightness(255);
 
-  // Энкодер
-  pinMode(ENC_CLK, INPUT_PULLUP);
-  pinMode(ENC_DT, INPUT_PULLUP);
-  pinMode(ENC_SW, INPUT_PULLUP);
+	pinMode(ENC_CLK, INPUT_PULLUP);
+	pinMode(ENC_DT, INPUT_PULLUP);
+	pinMode(ENC_SW, INPUT_PULLUP);
 
-  // Сразу синхронизируем внутреннее состояние библиотеки с реальными уровнями
-  // на ножках после включения МК. Это защищает от ложного первого шага.
-  encoder.tick();
-  lastEncoderPos = encoder.getPosition();
+	encoder.tick();
+	lastEncoderPos = encoder.getPosition();
 
-  // Подписываемся на оба сигнала энкодера.
-  // При любом изменении просто вызывается encoderISR(), а уже библиотека
-  // корректно вычисляет направление и новую позицию.
-  attachInterrupt(digitalPinToInterrupt(ENC_CLK), encoderISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_DT), encoderISR, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(ENC_CLK), encoderISR, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(ENC_DT), encoderISR, CHANGE);
 
-  // LVGL
-  lv_init();
-  lv_tick_set_cb(my_tick_get);
+	lv_init();
+	lv_tick_set_cb(my_tick_get);
 
-  disp = lv_display_create(SCR_W, SCR_H);
-  lv_display_set_flush_cb(disp, my_disp_flush);
-  lv_display_set_buffers(disp, draw_buf, NULL, sizeof(draw_buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
+	disp = lv_display_create(SCR_W, SCR_H);
+	lv_display_set_flush_cb(disp, my_disp_flush);
+	lv_display_set_buffers(disp, draw_buf, nullptr, sizeof(draw_buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-  encoder_group = lv_group_create();
-  lv_group_set_default(encoder_group);
+	encoder_group = lv_group_create();
+	lv_group_set_default(encoder_group);
 
-  encoder_indev = lv_indev_create();
-  lv_indev_set_type(encoder_indev, LV_INDEV_TYPE_ENCODER);
-  lv_indev_set_read_cb(encoder_indev, encoder_read_cb);
-  lv_indev_set_group(encoder_indev, encoder_group);
+	encoder_indev = lv_indev_create();
+	lv_indev_set_type(encoder_indev, LV_INDEV_TYPE_ENCODER);
+	lv_indev_set_read_cb(encoder_indev, encoder_read_cb);
+	lv_indev_set_group(encoder_indev, encoder_group);
 
-  // Splash screen
-  splash_screen();
+	splash_screen();
 
-  // Создаём все экраны
-  Serial.println("Creating screens...");
-  create_volume_master_screen();
-  create_volume_apps_screen();
-  create_devices_output_screen();
-  create_devices_input_screen();
+	create_volume_master_screen();
+	create_volume_apps_screen();
+	create_system_info_screen();
 
-  // Загружаем первый экран
-  switch_screen(SCREEN_VOLUME_MASTER);
+	switch_screen(SCREEN_VOLUME_MASTER);
 
-  Serial.println("Setup complete. Ready to navigate!");
+	Serial.println("Setup complete.");
 }
 
 void loop() {
-  update_encoder_input();
-  lv_timer_handler();
-  delay(5);
+	update_encoder_input();
+	lv_timer_handler();
+	delay(5);
 }
