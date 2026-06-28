@@ -1,0 +1,65 @@
+# AI CONTEXT — ESP32-S3 Volume Controller
+
+## WHAT IS THIS
+PlatformIO project. ESP32-S3 + ST7789V3 display (280×240 landscape) + KY-040 encoder.
+Arduino framework. GUI: LVGL v9. Display driver: LovyanGFX. Encoder lib: mathertel/RotaryEncoder@^1.6.0.
+Goal: desktop volume/media controller for PC. Currently Phase 1 — local demo, no PC link.
+
+## GIT
+- `main` — stable, landscape 280×240, .vscode removed
+- `dev-work` — active work branch (ahead of main)
+- Remote: https://github.com/TurboSosiska304/first_test_repo_by_ai.git
+
+## FILE MAP
+```
+platformio.ini          — board rymcu-esp32-s3-devkitc-1, USB CDC flags, lib_deps
+include/
+  my_display.hpp        — LovyanGFX config (ST7789, SPI2, pins, offset_y=20, rotation handled in code)
+  lv_conf.h             — LVGL config (16-bit color, 48KB mem, fonts 10-32, dark theme)
+  app_types.hpp         — shared types: SCR_W/SCR_H/BUF_LINES, ScreenId enum, AppVolume, Device structs
+  system_init.hpp       — init_system_memory(), print_system_memory_info() declarations
+src/
+  main.cpp              — everything: encoder, button debounce, 4 LVGL screens, splash, navigation, setup/loop
+  system_init.cpp       — PSRAM init + heap/flash diagnostics (currently prints to Serial, planned → LVGL screen)
+```
+
+## PINOUT (FIXED)
+Display: SCLK=12 MOSI=11 RST=17 DC=18 CS=10 BLK=8 (HIGH=on)
+Encoder1: CLK=40 DT=41 SW=42
+Encoder2: CLK=4 DT=5 SW=6 (wired, NO logic yet)
+Avoid: GPIO0, GPIO35/36/37 (PSRAM), GPIO48 (RGB LED)
+
+## DISPLAY
+ST7789V3, 240×280 physical, landscape via `gfx.setRotation(1)` → 280×240 logical.
+offset_y=20 (empirically found). BLK not inverted. LVGL buffer: 280×30 lines, partial render.
+
+## ENCODER
+RotaryEncoder lib, LatchMode::FOUR3. ISR on both CLK+DT pins → encoder.tick().
+Position-based delta in loop. Button: manual debounce, short press (<600ms) + long press (immediate on threshold).
+Long press = next screen (cyclic). Short press = screen-specific action (mute toggle etc).
+
+## CURRENT SCREENS (4)
+0: SCREEN_VOLUME_MASTER — slider + big % label, rotate=volume, short=mute
+1: SCREEN_VOLUME_APPS — app list with → selector, slider, rotate=select app, short=mute app
+2: SCREEN_DEVICES_OUTPUT — output device list with → selector
+3: SCREEN_DEVICES_INPUT — input device list with → selector
+
+## DESIGN
+Dark bg #101418, teal accent #4FD1C5, secondary #A0AEC0, hint #718096 (font 10, bottom-left).
+Sliders 236px wide. Montserrat fonts 10/12/14/16/32.
+
+## DEMO DATA (hardcoded, Phase 1)
+Apps: Master/Discord/Spotify/Browser with volumes.
+Devices: Speakers/Headphones, Mic1/Mic2.
+
+## IMMEDIATE TODO
+- Move system memory info from Serial output to a dedicated LVGL screen (new screen #4)
+- Continue multi-file refactoring: extract screens into ui_*.cpp, encoder into input.cpp, app state into app_state.cpp
+
+## HISTORY / GOTCHAS
+- Manual encoder ISR was replaced by RotaryEncoder lib — don't revert
+- Playback and SysInfo screens were deliberately removed from dev-work
+- Display rotation: LovyanGFX rotation(1) = landscape; rotation(0) = portrait (different from Adafruit)
+- offset_y=20 is critical, don't change without hardware testing
+- .vscode is gitignored, don't track it
+- Second encoder (pins 4/5/6) exists in hardware but has NO assigned behavior yet
