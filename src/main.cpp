@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <RotaryEncoder.h>
+#include "app_types.hpp"
+#include "system_init.hpp"
 #include "my_display.hpp"
 
 LGFX gfx;
@@ -39,36 +41,14 @@ const uint32_t ENC_LONG_PRESS_MS = 600; // скоро будет долгое н
 
 bool encBtnLongPressDetected = false;
 
-static const uint32_t SCR_W = 280;
-static const uint32_t SCR_H = 240;
-static const uint32_t BUF_LINES = 30;
 static lv_color_t draw_buf[SCR_W * BUF_LINES];
 
 static lv_display_t *disp;
 static lv_indev_t *encoder_indev;
 static lv_group_t *encoder_group;
 
-// =========================================================
-// Экраны (вкладки)
-// =========================================================
-enum ScreenId {
-  SCREEN_VOLUME_MASTER = 0,
-  SCREEN_VOLUME_APPS = 1,
-  SCREEN_DEVICES_OUTPUT = 2,
-  SCREEN_DEVICES_INPUT = 3,
-  NUM_SCREENS = 4
-};
-
 ScreenId currentScreen = SCREEN_VOLUME_MASTER;
 lv_obj_t *screens[NUM_SCREENS];
-
-// =========================================================
-// Демо-данные
-// =========================================================
-struct AppVolume {
-  const char *name;
-  int32_t volume;
-};
 
 AppVolume appVolumes[] = {
   {"Master", 100},
@@ -78,10 +58,6 @@ AppVolume appVolumes[] = {
 };
 const int NUM_APPS = 4;
 int selectedApp = 1; // начнём с Discord, не Master
-
-struct Device {
-  const char *name;
-};
 
 Device outputDevices[] = {
   {"Speakers"},
@@ -468,6 +444,12 @@ void setup() {
   Serial.begin(115200);
   delay(800);
   Serial.println("\n=== ФАЗА 1 v2: Multi-screen Volume Controller (4 tabs) ===");
+
+  // Ранняя инициализация системной памяти.
+  // Здесь поднимаем PSRAM, если она доступна на плате, и печатаем
+  // диагностическую информацию по heap/flash до запуска UI.
+  init_system_memory();
+  print_system_memory_info();
 
   gfx.init();
   gfx.setRotation(1);
